@@ -25,9 +25,14 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.PrintSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
+import org.apache.flink.util.Collector;
+
 
 /**
  * The Hourly Tips exercise from the Flink training.
@@ -40,9 +45,11 @@ public class HourlyTipsExercise {
     private final SourceFunction<TaxiFare> source;
     private final SinkFunction<Tuple3<Long, Long, Float>> sink;
 
-    /** Creates a job using the source and sink provided. */
+    /**
+     * Creates a job using the source and sink provided.
+     */
     public HourlyTipsExercise(
-            SourceFunction<TaxiFare> source, SinkFunction<Tuple3<Long, Long, Float>> sink) {
+        SourceFunction<TaxiFare> source, SinkFunction<Tuple3<Long, Long, Float>> sink) {
 
         this.source = source;
         this.sink = sink;
@@ -56,7 +63,7 @@ public class HourlyTipsExercise {
     public static void main(String[] args) throws Exception {
 
         HourlyTipsExercise job =
-                new HourlyTipsExercise(new TaxiFareGenerator(), new PrintSinkFunction<>());
+            new HourlyTipsExercise(new TaxiFareGenerator(), new PrintSinkFunction<>());
 
         job.execute();
     }
@@ -75,10 +82,11 @@ public class HourlyTipsExercise {
         // start the data generator
         DataStream<TaxiFare> fares = env.addSource(source);
 
-        // replace this with your solution
-        if (true) {
-            throw new MissingSolutionException();
-        }
+        fares
+            .keyBy(value -> value.driverId)
+            .window(TumblingEventTimeWindows.of(Time.minutes(1)))
+            .process(new TipsByHourSum())
+        ;
 
         // the results should be sent to the sink that was passed in
         // (otherwise the tests won't work)
@@ -89,5 +97,19 @@ public class HourlyTipsExercise {
 
         // execute the pipeline and return the result
         return env.execute("Hourly Tips");
+    }
+
+    class TipsByHourSum extends ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
+
+        @Override
+        public void process(Long driverId,
+                            ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow>.Context context,
+                            Iterable<TaxiFare> fares, Collector<Tuple3<Long, Long, Float>> out) throws Exception {
+            float totalTips = 0;
+            for (TaxiFare fare : fares) {
+                totalTips += fare.totalFare;
+            }
+            out.collect(Tuple3.of(driverId, context.window().getEnd(), totalTips));
+        }
     }
 }
